@@ -28,11 +28,13 @@ def parse_with_args(args):
         out['beats'] = bim    
         if bim != '4':
             if (args.strict // 2) % 2 == 1:
-                print('parse failed: the song does not have 4 beat time signature.')
+                if args.verbose == 2:
+                    print(f'{args.file_dir}: parse failed - the song does not have 4 beat time signature.')
                 return out
         if len(dct['tracks']['melody']) == 0 or len(dct['tracks']['chord']) == 0:
             if args.strict %2 == 1:
-                print('parse failed: the song has either empty melody or empty chord.')
+                if args.verbose == 2:
+                    print(f'{args.file_dir}: parse failed - the song has either empty melody or empty chord.')
                 return out
             else:
                 out['aligned'] = False
@@ -43,7 +45,7 @@ def parse_with_args(args):
         mode = dct['metadata']['mode']
         if mode == '1':
             aligned_dct['mode'] = 'major'
-            out['mode'] = major
+            out['mode'] = 'major'
         elif mode == '6':
             aligned_dct['mode'] = 'minor'
             out['mode'] = 'minor'
@@ -117,22 +119,34 @@ def parse_with_args(args):
         # after parsing and aligning
         if illegal:
             if args.strict % 2 == 1:
-                print('parse failed: the song has unaligned chord.')
+                if args.verbose == 2:
+                    print(f'{args.file_dir}: parse failed - the song has unaligned chord.')
                 return out
-        if not os.path.isdir('/'.join((args.out_dir + '/' + args.file_dir).split('/')[:-1])):
-            os.makedirs('/'.join((args.out_dir + '/' + args.file_dir).split('/')[:-1]))
-        with open(args.out_dir + '/' + args.file_dir, 'w') as fw:
+
+        # set output directory
+        out_dir = args.out_dir
+        out_dir += '/' + 'aligned' if out['aligned'] else 'unaligned'
+        out_dir += '/' + str(out['beats'])
+        out_dir += args.file_dir
+
+        if not os.path.isdir('/'.join(out_dir.split('/')[:-1])):
+            os.makedirs('/'.join(out_dir.split('/')[:-1]))
+        with open(out_dir, 'w') as fw:
             json.dump(aligned_dct, fw)
-            print(f'{args.file_dir} successfully parsed at {args.out_dir}')
+            if args.verbose == 2:
+                print(f'{args.file_dir}: successfully parsed at {args.out_dir}')
             out['result'] = True
         return out
 
-def parse(file_dir):
+def parse(file_dir, strict=3, verbose=2):
     class Args:
-        def __init__(self, fd):
+        def __init__(self, fd, st, v):
             self.file_dir = fd
             self.out_dir = 'output'
-    args = Args(file_dir)
+            self.strict = st
+            self.verbosity = v
+
+    args = Args(file_dir, strict, v)
     parse_with_args(args)
 
 def run_all(args):
@@ -172,25 +186,24 @@ def run_all(args):
                 files = list(filter(lambda x: x.endswith('_key.json'), files))
                 for f in files:
                     total_cnt += 1
-                    with open(song + f, "r") as fr:
-                        not_fit_cnt = 0
-                        out = parse_with_args(args)
-                        if out['result']:
-                            file_cnt += 1
-                        if out['beats'] != 4:
-                            not_four_cnt += 1
-                        if not out['aligned']:
-                            unaligned_songs += 1
-                        if out['mode'] == 'major':
-                            major_cnt += 1
-                        elif out['mode'] == 'minor':
-                            minor_cnt += 1
-                        else:
-                            unknown_cnt += 1
+                    args.file_dir = song + f
+                    out = parse_with_args(args)
+                    if out['result']:
+                        file_cnt += 1
+                    if out['beats'] != 4:
+                        not_four_cnt += 1
+                    if not out['aligned']:
+                        unaligned_songs += 1
+                    if out['mode'] == 'major':
+                        major_cnt += 1
+                    elif out['mode'] == 'minor':
+                        minor_cnt += 1
+                    else:
+                        unknown_cnt += 1
 
-                        # after parsing and aligning
-                        if file_cnt % 100 == 0:
-                            print(f'{file_cnt} files parsed')
+                    # after parsing and aligning
+                    if out['result'] and file_cnt % 100 == 0:
+                        print(f'{file_cnt} files parsed')
     # remove empty directories recursively
     def remove_r(path):
         if not os.path.isdir(path):
@@ -207,22 +220,29 @@ def run_all(args):
             os.rmdir(path)
 
     remove_r(result_path)
-    print(f'total songs: {total_cnt}')
-    print(f'songs without 4 beat time signature: {not_four_cnt}')
-    print('-'*50)
-    print(f'parsed songs: {file_cnt}')
-    print(f'songs with unaligned beats: {unaligned_songs}')
-    print(f'number of mode: {major_cnt} majors, {minor_cnt} minors, {unknown_cnt} unknown')
+
+    print('Finished parsing')
+    if args.verbose >= 1:
+        print(f'total songs: {total_cnt}')
+        print(f'songs without 4 beat time signature: {not_four_cnt}')
+        print('-'*50)
+        print(f'parsed songs: {file_cnt}')
+        print(f'songs with unaligned beats: {unaligned_songs}')
+        print(f'number of mode: {major_cnt} majors, {minor_cnt} minors, {unknown_cnt} unknown')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_dir', dest='file_dir', default='all')
     parser.add_argument('--out_dir', dest='out_dir', default='output')
-    parser.add_argument('--strict', dest='strict', type=int default=3, help='strictness to parse file\n\
+    parser.add_argument('--strict', dest='strict', type=int, default=3, help='strictness to parse file\n\
             0: no restriction\n\
             1: filter songs with unalinged chord or empty bar\n\
             2: fliter songs which are not 4 beat\n\
             3: both 1 and 2')
+    parser.add_argument('--verbose', dest='verbose', type=int, default=0, help='verbosity of execution\n\
+            0: prints only after all files parsed\n\
+            1: prints statistics\n\
+            2: prints all file names and their results')
     args = parser.parse_args()
     if args.file_dir == 'all':
         run_all(args)
